@@ -5,12 +5,19 @@ export default async function handlePurchaser(initData) {
   let queue = {};
   let liftCritical = {};
   let ackCounter = 0;
+  let currentLiftDepartureTime = null;
+  let ordersToSend = [];
+  let waitingForLiftSharedStatus = false;
 
   initState();
   handleLiftRequest();
   handleLiftAckRequest();
-  handleReleaseRequest();
   handleReleaseOthersRequest();
+  handleReleaseAllRequest();
+  handleLiftSharedRequest();
+  handleLiftSharedAnswerRequest();
+  handleLiftSharedStatusRequest();
+  handleOrdersSentRequest();
 
   await sleep(1000);
 
@@ -50,26 +57,76 @@ export default async function handlePurchaser(initData) {
 
   function handleReleaseOthersRequest() {
     MPI.recv("LIFT_RELEASE_OTHERS", (msg) => {
-      console.log("BEFORE: ");
-      console.log(queue);
+      liftCritical[msg.busyKey] = msg.processTid;
       const keysToRelease = Object.keys(queue).filter(
         (key) => key != msg.busyKey
       );
       keysToRelease.forEach((key) => {
         queue[key] = queue[key].filter((el) => el.tid != msg.processTid);
       });
-      console.log("AFTER: ");
+      console.log(liftCritical);
       console.log(queue);
     });
   }
 
-  function handleReleaseRequest() {
-    MPI.recv("LIFT_RELEASE", (msg) => {
-      console.log("BEFORE: ");
+  function handleReleaseAllRequest() {
+    MPI.recv("LIFT_RELEASE_ALL", (msg) => {
+      Object.keys(queue).forEach((key) => {
+        queue[key] = queue[key].filter((el) => el.tid != msg.processTid);
+      });
       console.log(queue);
-      queue[msg.key] = queue[msg.key].filter((el) => el.tid != msg.processTid);
-      console.log("AFTER: ");
+    });
+  }
+
+  function handleLiftSharedRequest() {
+    MPI.recv("LIFT_SHARED", (msg) => {
+      waitingForLiftSharedStatus = true;
+      MPI.send(msg.processTid, {
+        type: "LIFT_SHARED_ANSWER",
+        order: generateOrder(msg.liftKey),
+        processTid: initData.tid,
+      });
+    });
+  }
+
+  function handleLiftSharedAnswerRequest() {
+    MPI.recv("LIFT_SHARED_ANSWER", (msg) => {
+      const now = new Date();
+      if (currentLiftDepartureTime && currentLiftDepartureTime > now) {
+        MPI.send(msg.processTid, {
+          type: "LIFT_SHARED_OK",
+          processTid: initData.tid,
+        });
+        ordersToSend.push(msg.order);
+      } else {
+        MPI.send(msg.processTid, {
+          type: "LIFT_SHARED_GONE",
+          processTid: initData.tid,
+        });
+      }
+    });
+  }
+
+  function handleLiftSharedStatusRequest() {
+    MPI.recv("LIFT_SHARED_OK", () => {
+      waitingForLiftSharedStatus = false;
+      MPI.broadcast({ type: "LIFT_RELEASE_ALL", processTid: initData.tid });
+      broadcastLift();
+    });
+    MPI.recv("LIFT_SHARED_GONE", () => {
+      waitingForLiftSharedStatus = false;
+    });
+  }
+
+  function handleOrdersSentRequest() {
+    MPI.recv("ORDERS_SENT", (msg) => {
+      liftCritical[msg.liftKey] = null;
+      queue[msg.liftKey] = queue[msg.liftKey].filter(
+        (el) => el.tid != msg.processTid
+      );
+      console.log(liftCritical);
       console.log(queue);
+      liftLocation[msg.liftKey] = "DOWN_GET";
     });
   }
 
@@ -90,31 +147,70 @@ export default async function handlePurchaser(initData) {
         busyKey: key,
         processTid: initData.tid,
       });
-      await sleep(3000);
+      const order = generateOrder(key);
+      ordersToSend.push(order);
+      const departure = generateDepartureTime();
+      currentLiftDepartureTime = departure.departureDate;
+      queue[key].forEach((el) => {
+        if (el.tid !== initData.tid)
+          MPI.send(el.tid, {
+            type: "LIFT_SHARED",
+            liftKey: key,
+            processTid: initData.tid,
+          });
+      });
+      await sleep(departure.miliseconds);
+      currentLiftDepartureTime = null;
       MPI.broadcast({
-        type: "LIFT_RELEASE",
-        key,
+        type: "ORDERS_SENT",
+        ordersToSend,
+        liftKey: ordersToSend[0].liftKey,
         processTid: initData.tid,
       });
+      ordersToSend = [];
+      broadcastLift();
     }
+  }
+
+  function generateOrder(liftKey) {
+    return {
+      tid: initData.tid,
+      packagesNumber: generateRandom(1, initData.liftCapacity),
+      liftKey,
+    };
+  }
+
+  function generateDepartureTime() {
+    let date = new Date();
+    const seconds = generateRandom(3, 6);
+    date.setSeconds(date.getSeconds() + seconds);
+    return { departureDate: date, miliseconds: seconds * 1000 };
+  }
+
+  function generateRandom(min, max) {
+    return Math.floor(Math.random() * (max - min) + min);
   }
 
   function getFreeLiftKey() {
     for (const key of Object.keys(liftCritical)) {
       if (
-        !liftCritical[key] &&
+        liftCritical[key] === null &&
         liftLocation[key] === "UP_ORDERING" &&
-        queue[key][0].tid == initData.tid
+        queue[key][0] &&
+        queue[key][0].tid === initData.tid &&
+        !waitingForLiftSharedStatus
       ) {
         return key;
       }
     }
     return null;
   }
+
   function getTimestamp() {
     const hrTime = process.hrtime();
     return hrTime[0] * 1000000 + hrTime[1] / 1000;
   }
+
   async function sleep(ms) {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);

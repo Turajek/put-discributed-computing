@@ -1,1 +1,4 @@
 node_modules
+tid*
+err*
+outputtempTar.tar

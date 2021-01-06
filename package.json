@@ -4,8 +4,7 @@
   "description": "Javascript implementation of distributed computing alghoritm using mpi-node",
   "main": "main.js",
   "type": "module",
-  "scripts": {
-  },
+  "scripts": {},
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Turajek/put-discributed-computing.git"
@@ -20,6 +19,6 @@
   },
   "homepage": "https://github.com/Turajek/put-discributed-computing#readme",
   "dependencies": {
-    "mpi-node": "^0.5.7"
+    "mpi-node": "git://github.com/Turajek/mpi-node"
   }
 }

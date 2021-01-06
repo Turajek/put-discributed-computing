@@ -2,7 +2,7 @@ import MPI from "mpi-node";
 import handleCourier from "./handleCourier.mjs";
 import handlePurchaser from "./handlePurchaser.mjs";
 
-const liftsNumber = 2;
+const liftsNumber = 4;
 const liftCapacity = 5;
 
 MPI.init(main);
@@ -23,7 +23,7 @@ async function main() {
   });
 
   if (tid === 0) {
-    await sleep(500);
+    await sleep(1000);
     const roles = getRoles(size);
     MPI.broadcast({
       type: "ROLE",
