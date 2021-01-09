@@ -13,12 +13,18 @@ async function main() {
 
   MPI.recv("ROLE", (msg) => {
     const role = msg.content.purchasers.includes(tid) ? "purchaser" : "courier";
-    const initData = { tid, size, liftsNumber, liftCapacity };
+    const initData = {
+      tid,
+      size,
+      liftsNumber,
+      liftCapacity,
+      purchasersSize: msg.content.purchasers.length,
+      couriersSize: msg.content.couriers.length,
+    };
     if (role === "purchaser") {
       handlePurchaser(initData);
     } else {
-      handlePurchaser(initData);
-      //   handleCourier(initData);
+      handleCourier(initData);
     }
   });
 

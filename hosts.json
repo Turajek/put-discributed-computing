@@ -2,7 +2,7 @@
 [
     {
         "hostname": "localhost",
-        "processes": 4
+        "processes": 8
     }
 ],
 "mainFile" : "app.js"}

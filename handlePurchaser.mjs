@@ -8,6 +8,7 @@ export default async function handlePurchaser(initData) {
   let currentLiftDepartureTime = null;
   let ordersToSend = [];
   let waitingForLiftSharedStatus = false;
+  let waitingForPackage = false;
 
   initState();
   handleLiftRequest();
@@ -42,13 +43,14 @@ export default async function handlePurchaser(initData) {
         queue[key] = queue[key].sort((a, b) => a.timestamp - b.timestamp);
       });
       MPI.send(msg.tid, { type: "LIFT_ACK" });
+      console.log(queue);
     });
   }
 
   function handleLiftAckRequest() {
     MPI.recv("LIFT_ACK", async (msg) => {
       ackCounter++;
-      if (ackCounter == initData.size) {
+      if (ackCounter == initData.purchasersSize) {
         ackCounter = 0;
         tryAccessLift();
       }
@@ -110,6 +112,7 @@ export default async function handlePurchaser(initData) {
   function handleLiftSharedStatusRequest() {
     MPI.recv("LIFT_SHARED_OK", () => {
       waitingForLiftSharedStatus = false;
+      waitingForPackage = true;
       MPI.broadcast({ type: "LIFT_RELEASE_ALL", processTid: initData.tid });
       broadcastLift();
     });
@@ -139,7 +142,12 @@ export default async function handlePurchaser(initData) {
   }
 
   async function tryAccessLift() {
-    const key = getFreeLiftKey();
+    let key;
+    while (!key) {
+      key = getFreeLiftKey();
+      console.log(key);
+      await sleep(1000);
+    }
     if (key) {
       console.log(`-----> LIFT_${key}: tid ${initData.tid}`);
       MPI.broadcast({
@@ -164,10 +172,11 @@ export default async function handlePurchaser(initData) {
       MPI.broadcast({
         type: "ORDERS_SENT",
         ordersToSend,
-        liftKey: ordersToSend[0].liftKey,
+        liftKey: key,
         processTid: initData.tid,
       });
       ordersToSend = [];
+      waitingForPackage = true;
       broadcastLift();
     }
   }
@@ -177,6 +186,7 @@ export default async function handlePurchaser(initData) {
       tid: initData.tid,
       packagesNumber: generateRandom(1, initData.liftCapacity),
       liftKey,
+      timestamp: getTimestamp(),
     };
   }
 
@@ -198,7 +208,8 @@ export default async function handlePurchaser(initData) {
         liftLocation[key] === "UP_ORDERING" &&
         queue[key][0] &&
         queue[key][0].tid === initData.tid &&
-        !waitingForLiftSharedStatus
+        !waitingForLiftSharedStatus &&
+        !waitingForPackage
       ) {
         return key;
       }
