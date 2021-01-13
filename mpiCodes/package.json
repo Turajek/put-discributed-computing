@@ -1,0 +1,24 @@
+{
+  "name": "put-distributed-computing",
+  "version": "1.0.0",
+  "description": "Javascript implementation of distributed computing alghoritm using mpi-node",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Turajek/put-discributed-computing.git"
+  },
+  "keywords": [
+    "distributed-computing"
+  ],
+  "author": "Roman Turaj, Julita Turaj",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Turajek/put-discributed-computing/issues"
+  },
+  "homepage": "https://github.com/Turajek/put-discributed-computing#readme",
+  "dependencies": {
+    "mpi-node": "git://github.com/Turajek/mpi-node"
+  }
+}

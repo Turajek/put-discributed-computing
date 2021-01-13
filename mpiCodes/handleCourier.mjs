@@ -5,15 +5,11 @@ export default async function handleCourier(initData) {
   let queueGetPackage = {};
   let queueSendPackage = {};
   let orders = {};
-  let packagesToSend = [];
+  let packagesToSend = {};
   let liftCritical = {};
   let preparedOrders = [];
   let ackGetPackageCounter = 0;
   let ackSendPackageCounter = 0;
-  let currentLiftDepartureTime;
-  let currentCapacity = 0;
-  let waitingPackage = null;
-  let waitingForLiftSharedStatus = false;
 
   initState();
   handleOrdersSentRequest();
@@ -23,7 +19,6 @@ export default async function handleCourier(initData) {
   handleLiftGetReleaseRequest();
   handleLiftSendPackageAckRequest();
   handleLiftDownPostRequest();
-  handleLiftSharedRequest();
   await sleep(1000);
 
   broadcastGetPackage();
@@ -35,6 +30,7 @@ export default async function handleCourier(initData) {
       queueSendPackage[i] = [];
       orders[i] = [];
       liftCritical[i] = null;
+      packagesToSend[i] = [];
     }
   }
 
@@ -93,7 +89,7 @@ export default async function handleCourier(initData) {
       if (ackSendPackageCounter == initData.couriersSize) {
         console.log(queueSendPackage);
         ackSendPackageCounter = 0;
-        await trySendPackage();
+        trySendPackage();
       }
     });
   }
@@ -111,51 +107,7 @@ export default async function handleCourier(initData) {
 
   function handleLiftDownPostRequest() {
     MPI.recv("LIFT_DOWN_POST", (msg) => {
-      liftLocation[msg.liftKey] = "DOWN_POST";
-    });
-  }
-
-    function handleLiftSharedRequest() {
-    MPI.recv("LIFT_SHARED_DOWN", (msg) => {
-      waitingForLiftSharedStatus = true;
-      waitingPackage = preparedOrders.find(el => el.liftKey === msg.liftKey);
-      MPI.send(msg.processTid, {
-        type: "LIFT_SHARED_DOWN_ANSWER",
-        package: waitingPackage,
-        processTid: initData.tid,
-      });
-    });
-  }
-
-    function handleLiftSharedAnswerRequest() {
-    MPI.recv("LIFT_SHARED_DOWN_ANSWER", (msg) => {
-      const now = new Date();
-      if (currentLiftDepartureTime && currentLiftDepartureTime > now && currentCapacity + msg.package.packagesNumber <= initData.liftCapacity) {
-        MPI.send(msg.processTid, {
-          type: "LIFT_SHARED_DOWN_OK",
-          processTid: initData.tid,
-        });
-        packagesToSend.push(msg.package),
-        currentCapacity+= msg.package.packagesNumber
-      } else {
-        MPI.send(msg.processTid, {
-          type: "LIFT_SHARED_DOWN_GONE",
-          processTid: initData.tid,
-        });
-      }
-    });
-  }
-
-  function handleLiftSharedStatusRequest() {
-    MPI.recv("LIFT_SHARED_OK", () => {
-      waitingForLiftSharedStatus = false;
-      // preparedPackages = no watiingPackage
-      waitingPackage = null;
-      //broadcast release
-    });
-    MPI.recv("LIFT_SHARED_GONE", () => {
-      waitingForLiftSharedStatus = false;
-      waitingPackage = null;
+      liftLocation[msg.liftKey] = "LIFT_DOWN_POST";
     });
   }
 
@@ -183,19 +135,12 @@ export default async function handleCourier(initData) {
   }
   function getFreeLiftSendKey() {
     for (const key of Object.keys(liftCritical)) {
-      console.log(
-        liftCritical[key] === null,
-        liftLocation[key] === "DOWN_POST",
-        queueSendPackage[key][0],
-        queueSendPackage[key][0].tid === initData.tid,
-        preparedOrders.some((el) => el.liftKey === key)
-      );
       if (
         liftCritical[key] === null &&
-        liftLocation[key] === "DOWN_POST" &&
-        queueSendPackage[key][0] &&
-        queueSendPackage[key][0].tid === initData.tid &&
-        preparedOrders.some((el) => el.liftKey === key)
+        liftLocation[key] === "DOWN_GET" &&
+        queueGetPackage[key][0] &&
+        queueGetPackage[key][0].tid === initData.tid &&
+        orders[key].length
       ) {
         return key;
       }
@@ -246,6 +191,7 @@ export default async function handleCourier(initData) {
         broadcastGetPackage();
       }
     }
+    //
   }
 
   async function prepareOrder(order) {
@@ -263,33 +209,8 @@ export default async function handleCourier(initData) {
     }
     return true;
   }
-  async function trySendPackage() {
-    let key;
-    while (!key) {
-      key = getFreeLiftSendKey();
-      await sleep(500);
-    }
-    if (key) {
-      packagesToSend[key] = preparedOrders.filter(el => el.liftKey == key);
-      preparedOrders = preparedOrders.filter(el => el.liftKey !== key);
-      const departure = generateDepartureTime();
-      currentLiftDepartureTime = departure.departureDate;
-      queueSendPackage[key].forEach(el => {
-        if (el.tid !== initData.tid){
-          MPI.send(el.tid, {
-            type: "LIFT_SHARED_DOWN",
-            liftKey: key,
-            processTid: initData.tid
-          })
-        }
-        await sleep(departure.miliseconds);
-        currentLiftDepartureTime = null;
-        MPI.broadcast({
-          type: "PACKAGES_SENT",
-          packagesToSend
-        })
-      })
-    }
+  function trySendPackage() {
+    //
   }
   function getTimestamp() {
     const hrTime = process.hrtime();
@@ -300,10 +221,4 @@ export default async function handleCourier(initData) {
       setTimeout(resolve, ms);
     });
   }
-    function generateDepartureTime() {
-      let date = new Date();
-      const seconds = generateRandom(3, 6);
-      date.setSeconds(date.getSeconds() + seconds);
-      return { departureDate: date, miliseconds: seconds * 1000 };
-    }
 }
