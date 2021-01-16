@@ -117,6 +117,7 @@ export default async function handleCourier(initData) {
       });
       queueGetPackage[msg.liftKey].shift();
       orders[msg.liftKey].shift();
+      console.log(orders);
     });
   }
 
@@ -157,8 +158,8 @@ export default async function handleCourier(initData) {
           type: "LIFT_SHARED_DOWN_OK",
           processTid: initData.tid,
         });
-        packagesToSend.push(msg.package),
-          (currentCapacity += msg.package.packagesNumber);
+        packagesToSend.push(msg.package);
+        currentCapacity += msg.package.packagesNumber;
       } else {
         MPI.send(msg.processTid, {
           type: "LIFT_SHARED_DOWN_GONE",
@@ -169,12 +170,17 @@ export default async function handleCourier(initData) {
   }
 
   function handleLiftSharedStatusRequest() {
-    MPI.recv("LIFT_SHARED_OK", () => {
+    MPI.recv("LIFT_SHARED_DOWN_OK", () => {
       preparedPackages.splice(waitingPackage.index, 1);
       broadcastLiftSendRelease(waitingPackage.liftKey);
       waitingPackage = null;
+      if (preparedPackages.length) {
+        broadcastLiftSendPackage();
+      } else {
+        broadcastGetPackage();
+      }
     });
-    MPI.recv("LIFT_SHARED_GONE", () => {
+    MPI.recv("LIFT_SHARED_DOWN_GONE", () => {
       waitingPackage = null;
     });
   }
@@ -198,6 +204,15 @@ export default async function handleCourier(initData) {
     MPI.broadcast({
       type: "LIFT_SEND_RELEASE",
       liftKey,
+    });
+  }
+
+  function broadcastLiftSendPackage() {
+    MPI.broadcast({
+      type: "LIFT_SEND_PACKAGE",
+      tid: initData.tid,
+      liftKeys: preparedPackages.map((el) => el.liftKey),
+      timestamp: getTimestamp(),
     });
   }
 
@@ -243,12 +258,7 @@ export default async function handleCourier(initData) {
       key = getFreeLiftGetKey();
       await sleep(500);
       if (getCanResign()) {
-        MPI.broadcast({
-          type: "LIFT_SEND_PACKAGE",
-          tid: initData.tid,
-          liftKeys: preparedPackages.map((el) => el.liftKey),
-          timestamp: getTimestamp(),
-        });
+        broadcastLiftSendPackage(preparedPackages.map((el) => el.liftKey));
         break;
       }
     }
@@ -262,12 +272,7 @@ export default async function handleCourier(initData) {
 
       await prepareOrder(orderToPrepare);
       if (allOrdersDelegated()) {
-        MPI.broadcast({
-          type: "LIFT_SEND_PACKAGE",
-          tid: initData.tid,
-          liftKeys: preparedPackages.map((el) => el.liftKey),
-          timestamp: getTimestamp(),
-        });
+        broadcastLiftSendPackage();
       } else {
         broadcastGetPackage();
       }
@@ -324,12 +329,19 @@ export default async function handleCourier(initData) {
         currentLiftDepartureTime = null;
       }
 
-      broadcastLiftSendRelease(packagesToSend[0].liftKey);
+      broadcastLiftSendRelease(key);
 
       MPI.broadcast({
         type: "PACKAGES_SENT",
         packages: packagesToSend,
       });
+      packagesToSend = [];
+      currentCapacity = 0;
+      if (preparedPackages.length) {
+        broadcastLiftSendPackage();
+      } else {
+        broadcastGetPackage();
+      }
     }
   }
   function getTimestamp() {
@@ -343,9 +355,9 @@ export default async function handleCourier(initData) {
   }
   function generateDepartureTime() {
     let date = new Date();
-    const seconds = generateRandom(3, 6);
-    date.setSeconds(date.getSeconds() + seconds);
-    return { departureDate: date, miliseconds: seconds * 1000 };
+    const miliseconds = generateRandom(3, 6);
+    date.setMilliseconds(date.getMilliseconds() + miliseconds);
+    return { departureDate: date, miliseconds };
   }
 
   function generateRandom(min, max) {

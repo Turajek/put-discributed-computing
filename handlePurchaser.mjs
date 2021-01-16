@@ -136,6 +136,10 @@ export default async function handlePurchaser(initData) {
 
   function handlePackagesSentRequest() {
     MPI.recv("PACKAGES_SENT", (msg) => {
+      liftLocation[msg.packages[0].liftKey].push({
+        status: "UP_ORDERING",
+        timestamp: getTimestamp(),
+      });
       const myPackage = msg.packages.find((el) => el.tid == initData.tid);
       if (myPackage) {
         MPI.broadcast({
@@ -143,6 +147,8 @@ export default async function handlePurchaser(initData) {
           tid: initData.tid,
           myPackage,
         });
+        waitingForPackage = false;
+        broadcastLift();
       }
     });
   }
@@ -204,9 +210,9 @@ export default async function handlePurchaser(initData) {
 
   function generateDepartureTime() {
     let date = new Date();
-    const seconds = generateRandom(1, 2);
-    date.setSeconds(date.getSeconds() + seconds);
-    return { departureDate: date, miliseconds: seconds * 1000 };
+    const miliseconds = generateRandom(3, 6);
+    date.setMilliseconds(date.getMilliseconds() + miliseconds);
+    return { departureDate: date, miliseconds };
   }
 
   function generateRandom(min, max) {
