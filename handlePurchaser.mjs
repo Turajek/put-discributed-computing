@@ -27,14 +27,17 @@ export default async function handlePurchaser(initData) {
 
   function initState() {
     for (let i = 1; i <= initData.liftsNumber; i++) {
-      liftLocation[i] = "UP_ORDERING";
-    }
-    for (let i = 1; i <= initData.liftsNumber; i++) {
+      liftLocation[i] = [{ status: "UP_ORDERING", timestamp: getTimestamp() }];
       queue[i] = [];
-    }
-    for (let i = 1; i <= initData.liftsNumber; i++) {
       liftCritical[i] = null;
     }
+  }
+
+  function getLiftLocation(liftKey) {
+    const sorted = liftLocation[liftKey].sort(
+      (a, b) => b.timestamp - a.timestamp
+    );
+    return sorted[0].status;
   }
 
   function handleLiftRequest() {
@@ -124,7 +127,10 @@ export default async function handlePurchaser(initData) {
       queue[msg.liftKey] = queue[msg.liftKey].filter(
         (el) => el.tid != msg.processTid
       );
-      liftLocation[msg.liftKey] = "DOWN_GET";
+      liftLocation[msg.liftKey].push({
+        status: "DOWN_GET",
+        timestamp: getTimestamp(),
+      });
     });
   }
 
@@ -198,7 +204,7 @@ export default async function handlePurchaser(initData) {
 
   function generateDepartureTime() {
     let date = new Date();
-    const seconds = generateRandom(3, 6);
+    const seconds = generateRandom(1, 2);
     date.setSeconds(date.getSeconds() + seconds);
     return { departureDate: date, miliseconds: seconds * 1000 };
   }
@@ -211,7 +217,7 @@ export default async function handlePurchaser(initData) {
     for (const key of Object.keys(liftCritical)) {
       if (
         liftCritical[key] === null &&
-        liftLocation[key] === "UP_ORDERING" &&
+        getLiftLocation(key) === "UP_ORDERING" &&
         queue[key][0] &&
         queue[key][0].tid === initData.tid
       ) {
