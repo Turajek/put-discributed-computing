@@ -19,6 +19,7 @@ export default async function handlePurchaser(initData) {
   handleLiftSharedAnswerRequest();
   handleLiftSharedStatusRequest();
   handleOrdersSentRequest();
+  handlePackagesSentRequest();
 
   await sleep(1000);
 
@@ -43,7 +44,6 @@ export default async function handlePurchaser(initData) {
         queue[key] = queue[key].sort((a, b) => a.timestamp - b.timestamp);
       });
       MPI.send(msg.tid, { type: "LIFT_ACK" });
-      console.log(queue);
     });
   }
 
@@ -66,8 +66,6 @@ export default async function handlePurchaser(initData) {
       keysToRelease.forEach((key) => {
         queue[key] = queue[key].filter((el) => el.tid != msg.processTid);
       });
-      console.log(liftCritical);
-      console.log(queue);
     });
   }
 
@@ -76,7 +74,6 @@ export default async function handlePurchaser(initData) {
       Object.keys(queue).forEach((key) => {
         queue[key] = queue[key].filter((el) => el.tid != msg.processTid);
       });
-      console.log(queue);
     });
   }
 
@@ -127,9 +124,20 @@ export default async function handlePurchaser(initData) {
       queue[msg.liftKey] = queue[msg.liftKey].filter(
         (el) => el.tid != msg.processTid
       );
-      console.log(liftCritical);
-      console.log(queue);
       liftLocation[msg.liftKey] = "DOWN_GET";
+    });
+  }
+
+  function handlePackagesSentRequest() {
+    MPI.recv("PACKAGES_SENT", (msg) => {
+      const myPackage = msg.packages.find((el) => el.tid == initData.tid);
+      if (myPackage) {
+        MPI.broadcast({
+          type: "Finally! Ive got my package",
+          tid: initData.tid,
+          myPackage,
+        });
+      }
     });
   }
 
@@ -143,13 +151,12 @@ export default async function handlePurchaser(initData) {
 
   async function tryAccessLift() {
     let key;
-    while (!key) {
+    while (!key && !waitingForPackage && !waitingForLiftSharedStatus) {
       key = getFreeLiftKey();
-      console.log(key);
       await sleep(1000);
     }
     if (key) {
-      console.log(`-----> LIFT_${key}: tid ${initData.tid}`);
+      console.log(`LIFT (sending order): ${key} - process ${initData.tid}`);
       MPI.broadcast({
         type: "LIFT_RELEASE_OTHERS",
         busyKey: key,
@@ -177,7 +184,6 @@ export default async function handlePurchaser(initData) {
       });
       ordersToSend = [];
       waitingForPackage = true;
-      broadcastLift();
     }
   }
 
@@ -207,9 +213,7 @@ export default async function handlePurchaser(initData) {
         liftCritical[key] === null &&
         liftLocation[key] === "UP_ORDERING" &&
         queue[key][0] &&
-        queue[key][0].tid === initData.tid &&
-        !waitingForLiftSharedStatus &&
-        !waitingForPackage
+        queue[key][0].tid === initData.tid
       ) {
         return key;
       }
