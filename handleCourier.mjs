@@ -13,6 +13,7 @@ export default async function handleCourier(initData) {
   let currentLiftDepartureTime;
   let currentCapacity = 0;
   let waitingPackage = null;
+  let lamportClock = 0;
 
   initState();
   handleOrdersSentRequest();
@@ -49,7 +50,7 @@ export default async function handleCourier(initData) {
   }
 
   function handleOrdersSentRequest() {
-    MPI.recv("ORDERS_SENT", (msg) => {
+    recv("ORDERS_SENT", (msg) => {
       liftLocation[msg.liftKey].push({
         status: "DOWN_GET",
         timestamp: getTimestamp(),
@@ -63,19 +64,19 @@ export default async function handleCourier(initData) {
   }
 
   function handleLiftGetPackageRequest() {
-    MPI.recv("LIFT_GET_PACKAGE", (msg) => {
+    recv("LIFT_GET_PACKAGE", (msg) => {
       Object.keys(queueGetPackage).forEach((key) => {
         queueGetPackage[key].push({ tid: msg.tid, timestamp: msg.timestamp });
         queueGetPackage[key] = queueGetPackage[key].sort(
           (a, b) => a.timestamp - b.timestamp
         );
       });
-      MPI.send(msg.tid, { type: "LIFT_GET_PACKAGE_ACK" });
+      send(msg.tid, { type: "LIFT_GET_PACKAGE_ACK" });
     });
   }
 
   function handleLiftSendPackageRequest() {
-    MPI.recv("LIFT_SEND_PACKAGE", (msg) => {
+    recv("LIFT_SEND_PACKAGE", (msg) => {
       msg.liftKeys.forEach((key) => {
         queueSendPackage[key].push({
           tid: msg.tid,
@@ -86,12 +87,12 @@ export default async function handleCourier(initData) {
         );
       });
 
-      MPI.send(msg.tid, { type: "LIFT_SEND_PACKAGE_ACK" });
+      send(msg.tid, { type: "LIFT_SEND_PACKAGE_ACK" });
     });
   }
 
   function handleLiftGetPackageAckRequest() {
-    MPI.recv("LIFT_GET_PACKAGE_ACK", async () => {
+    recv("LIFT_GET_PACKAGE_ACK", async () => {
       ackGetPackageCounter++;
       if (ackGetPackageCounter == initData.couriersSize) {
         ackGetPackageCounter = 0;
@@ -100,7 +101,7 @@ export default async function handleCourier(initData) {
     });
   }
   function handleLiftSendPackageAckRequest() {
-    MPI.recv("LIFT_SEND_PACKAGE_ACK", async () => {
+    recv("LIFT_SEND_PACKAGE_ACK", async () => {
       ackSendPackageCounter++;
       if (ackSendPackageCounter == initData.couriersSize) {
         ackSendPackageCounter = 0;
@@ -110,19 +111,19 @@ export default async function handleCourier(initData) {
   }
 
   function handleLiftGetReleaseRequest() {
-    MPI.recv("LIFT_GET_RELEASE", (msg) => {
+    recv("LIFT_GET_RELEASE", (msg) => {
       liftCritical[msg.liftKey] = null;
       Object.keys(queueGetPackage).forEach((key) => {
-        queueGetPackage[key].shift();
+        queueGetPackage[key] = queueGetPackage[key].filter(
+          (el) => el.tid != msg.processTid
+        );
       });
-      queueGetPackage[msg.liftKey].shift();
       orders[msg.liftKey].shift();
-      console.log(orders);
     });
   }
 
   function handleLiftDownPostRequest() {
-    MPI.recv("LIFT_DOWN_POST", (msg) => {
+    recv("LIFT_DOWN_POST", (msg) => {
       liftLocation[msg.liftKey].push({
         status: "DOWN_POST",
         timestamp: getTimestamp(),
@@ -131,14 +132,14 @@ export default async function handleCourier(initData) {
   }
 
   function handleLiftSharedRequest() {
-    MPI.recv("LIFT_SHARED_DOWN", (msg) => {
+    recv("LIFT_SHARED_DOWN", (msg) => {
       waitingPackage = preparedPackages.find(
         (el) => el.liftKey === msg.liftKey
       );
       waitingPackage.index = preparedPackages.findIndex(
         (el) => el.liftKey === msg.liftKey
       );
-      MPI.send(msg.processTid, {
+      send(msg.processTid, {
         type: "LIFT_SHARED_DOWN_ANSWER",
         package: waitingPackage,
         processTid: initData.tid,
@@ -147,21 +148,21 @@ export default async function handleCourier(initData) {
   }
 
   function handleLiftSharedAnswerRequest() {
-    MPI.recv("LIFT_SHARED_DOWN_ANSWER", (msg) => {
+    recv("LIFT_SHARED_DOWN_ANSWER", (msg) => {
       const now = new Date();
       if (
         currentLiftDepartureTime &&
         currentLiftDepartureTime > now &&
         currentCapacity + msg.package.packagesNumber <= initData.liftCapacity
       ) {
-        MPI.send(msg.processTid, {
+        send(msg.processTid, {
           type: "LIFT_SHARED_DOWN_OK",
           processTid: initData.tid,
         });
         packagesToSend.push(msg.package);
         currentCapacity += msg.package.packagesNumber;
       } else {
-        MPI.send(msg.processTid, {
+        send(msg.processTid, {
           type: "LIFT_SHARED_DOWN_GONE",
           processTid: initData.tid,
         });
@@ -170,7 +171,7 @@ export default async function handleCourier(initData) {
   }
 
   function handleLiftSharedStatusRequest() {
-    MPI.recv("LIFT_SHARED_DOWN_OK", () => {
+    recv("LIFT_SHARED_DOWN_OK", () => {
       preparedPackages.splice(waitingPackage.index, 1);
       broadcastLiftSendRelease(waitingPackage.liftKey);
       waitingPackage = null;
@@ -180,20 +181,22 @@ export default async function handleCourier(initData) {
         broadcastGetPackage();
       }
     });
-    MPI.recv("LIFT_SHARED_DOWN_GONE", () => {
+    recv("LIFT_SHARED_DOWN_GONE", () => {
       waitingPackage = null;
     });
   }
 
   function handleLiftSendReleaseRequest() {
-    MPI.recv("LIFT_SEND_RELEASE", (msg) => {
+    recv("LIFT_SEND_RELEASE", (msg) => {
       liftCritical[msg.liftKey] = null;
-      queueSendPackage[msg.liftKey].shift();
+      queueSendPackage[msg.liftKey] = queueSendPackage[msg.liftKey].filter(
+        (el) => el.tid != msg.processTid
+      );
     });
   }
 
   function broadcastGetPackage() {
-    MPI.broadcast({
+    broadcast({
       type: "LIFT_GET_PACKAGE",
       tid: initData.tid,
       timestamp: getTimestamp(),
@@ -201,14 +204,15 @@ export default async function handleCourier(initData) {
   }
 
   function broadcastLiftSendRelease(liftKey) {
-    MPI.broadcast({
+    broadcast({
       type: "LIFT_SEND_RELEASE",
       liftKey,
+      processTid: initData.tid,
     });
   }
 
   function broadcastLiftSendPackage() {
-    MPI.broadcast({
+    broadcast({
       type: "LIFT_SEND_PACKAGE",
       tid: initData.tid,
       liftKeys: preparedPackages.map((el) => el.liftKey),
@@ -266,9 +270,13 @@ export default async function handleCourier(initData) {
       console.log(`LIFT (getting order): ${key} - process ${initData.tid}`);
       const orderToPrepare = { ...orders[key][0] };
       if (orders[key].length === 1) {
-        MPI.broadcast({ type: "LIFT_DOWN_POST", liftKey: key });
+        broadcast({ type: "LIFT_DOWN_POST", liftKey: key });
       }
-      MPI.broadcast({ type: "LIFT_GET_RELEASE", liftKey: key });
+      broadcast({
+        type: "LIFT_GET_RELEASE",
+        liftKey: key,
+        processTid: initData.tid,
+      });
 
       await prepareOrder(orderToPrepare);
       if (allOrdersDelegated()) {
@@ -318,7 +326,7 @@ export default async function handleCourier(initData) {
         currentLiftDepartureTime = departure.departureDate;
         queueSendPackage[key].forEach((el) => {
           if (el.tid !== initData.tid) {
-            MPI.send(el.tid, {
+            send(el.tid, {
               type: "LIFT_SHARED_DOWN",
               liftKey: key,
               processTid: initData.tid,
@@ -331,7 +339,7 @@ export default async function handleCourier(initData) {
 
       broadcastLiftSendRelease(key);
 
-      MPI.broadcast({
+      broadcast({
         type: "PACKAGES_SENT",
         packages: packagesToSend,
       });
@@ -362,5 +370,28 @@ export default async function handleCourier(initData) {
 
   function generateRandom(min, max) {
     return Math.floor(Math.random() * (max - min) + min);
+  }
+  function recv(type, callback) {
+    console.log("LAMPORT CLOCK: " + lamportClock);
+    MPI.recv(type, (msg) => {
+      lamportClock =
+        lamportClock >= msg.lamportClock
+          ? lamportClock + 1
+          : msg.lamportClock + 1;
+      callback(msg);
+    });
+  }
+  function send(tid, message) {
+    lamportClock++;
+    const messageWithClock = { ...message, lamportClock };
+    console.log("LAMPORT CLOCK: " + lamportClock);
+    MPI.send(tid, messageWithClock);
+  }
+
+  function broadcast(message) {
+    lamportClock++;
+    const messageWithClock = { ...message, lamportClock };
+    console.log("LAMPORT CLOCK: " + lamportClock);
+    MPI.broadcast(messageWithClock);
   }
 }
