@@ -136,9 +136,6 @@ export default async function handleCourier(initData) {
       waitingPackage = preparedPackages.find(
         (el) => el.liftKey === msg.liftKey
       );
-      waitingPackage.index = preparedPackages.findIndex(
-        (el) => el.liftKey === msg.liftKey
-      );
       send(msg.processTid, {
         type: "LIFT_SHARED_DOWN_ANSWER",
         package: waitingPackage,
@@ -172,7 +169,9 @@ export default async function handleCourier(initData) {
 
   function handleLiftSharedStatusRequest() {
     recv("LIFT_SHARED_DOWN_OK", () => {
-      preparedPackages.splice(waitingPackage.index, 1);
+      preparedPackages = preparedPackages.filter(
+        (el) => el.timestamp != waitingPackage.timestamp
+      );
       broadcastLiftSendRelease(waitingPackage.liftKey);
       waitingPackage = null;
       if (preparedPackages.length) {
@@ -262,7 +261,9 @@ export default async function handleCourier(initData) {
       key = getFreeLiftGetKey();
       await sleep(500);
       if (getCanResign()) {
-        broadcastLiftSendPackage(preparedPackages.map((el) => el.liftKey));
+        if (preparedPackages.length) {
+          broadcastLiftSendPackage();
+        }
         break;
       }
     }
@@ -279,7 +280,7 @@ export default async function handleCourier(initData) {
       });
 
       await prepareOrder(orderToPrepare);
-      if (allOrdersDelegated()) {
+      if (allOrdersDelegated() && preparedPackages.length) {
         broadcastLiftSendPackage();
       } else {
         broadcastGetPackage();
@@ -289,6 +290,7 @@ export default async function handleCourier(initData) {
 
   async function prepareOrder(order) {
     await sleep(500);
+    order.timestamp = getTimestamp();
     preparedPackages.push(order);
   }
 
@@ -311,8 +313,8 @@ export default async function handleCourier(initData) {
 
       preparedPackages.forEach((packageItem) => {
         if (
-          currentCapacity + packageItem.packagesNumber <=
-          initData.liftCapacity
+          packageItem.liftKey === key &&
+          currentCapacity + packageItem.packagesNumber <= initData.liftCapacity
         ) {
           packagesToSend.push(packageItem);
           packageItem.toRemove = true;

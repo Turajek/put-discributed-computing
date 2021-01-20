@@ -83,12 +83,14 @@ export default async function handlePurchaser(initData) {
 
   function handleLiftSharedRequest() {
     recv("LIFT_SHARED", (msg) => {
-      waitingForLiftSharedStatus = true;
-      send(msg.processTid, {
-        type: "LIFT_SHARED_ANSWER",
-        order: generateOrder(msg.liftKey),
-        processTid: initData.tid,
-      });
+      if (!waitingForPackage) {
+        waitingForLiftSharedStatus = true;
+        send(msg.processTid, {
+          type: "LIFT_SHARED_ANSWER",
+          order: generateOrder(msg.liftKey),
+          processTid: initData.tid,
+        });
+      }
     });
   }
 
@@ -144,7 +146,7 @@ export default async function handlePurchaser(initData) {
       const myPackage = msg.packages.find((el) => el.tid == initData.tid);
       if (myPackage) {
         broadcast({
-          type: "Finally! Ive got my package",
+          type: "COMPLETED",
           tid: initData.tid,
           myPackage,
         });
@@ -163,7 +165,7 @@ export default async function handlePurchaser(initData) {
 
   async function tryAccessLift() {
     let key;
-    while (!key && !waitingForPackage && !waitingForLiftSharedStatus) {
+    while (!key || waitingForPackage || waitingForLiftSharedStatus) {
       key = getFreeLiftKey();
       await sleep(1000);
     }

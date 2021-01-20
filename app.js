@@ -10,6 +10,8 @@ MPI.init(main);
 async function main() {
   const tid = MPI.rank();
   const size = MPI.size();
+  let purchasersSize;
+  let completedCounter = 0;
 
   MPI.recv("ROLE", (msg) => {
     const role = msg.content.purchasers.includes(tid) ? "purchaser" : "courier";
@@ -21,10 +23,20 @@ async function main() {
       purchasersSize: msg.content.purchasers.length,
       couriersSize: msg.content.couriers.length,
     };
+    purchasersSize = msg.content.purchasers.length;
     if (role === "purchaser") {
       handlePurchaser(initData);
     } else {
       handleCourier(initData);
+    }
+  });
+
+  MPI.recv("COMPLETED", () => {
+    completedCounter++;
+    console.log("completedCounter: " + completedCounter);
+    if (completedCounter === purchasersSize) {
+      console.log("The alghoritm was successfull");
+      process.exit();
     }
   });
 
